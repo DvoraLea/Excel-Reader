@@ -1,0 +1,1 @@
+This would be a web application that takes Excel invoices and creates clear revenue summaries and visualizations. 
