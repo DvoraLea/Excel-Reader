@@ -8,6 +8,7 @@ import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
 
+@CrossOrigin(origins = "http://localhost:63342")
 @RestController
 @RequestMapping("/files")
 public class FileController {
