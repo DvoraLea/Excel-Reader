@@ -1,69 +1,76 @@
 package com.example.demo;
 
+import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.poi.ss.usermodel.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 @CrossOrigin(origins = "http://localhost:63342")
 @RestController
 @RequestMapping("/files")
 public class FileController {
 
-    @PostMapping("/upload")
-    public Map<String, Object> uploadAndCalculate(@RequestParam("file") MultipartFile file) {
-        Map<String, Object> results = new HashMap<>();
-        double totalIncomeMDN = 0.0;
-        double totalIncomeMR = 0.0;
-        int countMDN = 0;
-        int countMR = 0;
+    @PostMapping("/uploadZip")
+    public Map<String, Map<String, Object>> uploadAndCalculateFromZip(@RequestParam("file") MultipartFile zipFile) {
+        Map<String, Map<String, Object>> accountResults = new HashMap<>();
 
-        try (InputStream inputStream = file.getInputStream()) {
-            Workbook workbook = WorkbookFactory.create(inputStream);
+        try (InputStream zipInputStream = zipFile.getInputStream();
+             ZipInputStream zis = new ZipInputStream(zipInputStream)) {
 
-            int numberOfSheets = workbook.getNumberOfSheets();
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                if (!entry.getName().endsWith(".xlsx")) {
+                    continue; // Skip non-Excel files
+                }
 
-            if (numberOfSheets == 1) {
-                // Single sheet with MDN and MR in one column
-                Sheet singleSheet = workbook.getSheetAt(0);
-                Map<String, Object> singleSheetResults = new HashMap<>();
-                PostPaidSheetProcessor.process(singleSheet, singleSheetResults);
+                // Use a ByteArrayOutputStream to hold the content of the current file
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] tempBuffer = new byte[1024];
+                int bytesRead;
+                while ((bytesRead = zis.read(tempBuffer)) != -1) {
+                    buffer.write(tempBuffer, 0, bytesRead);
+                }
+                InputStream excelStream = new ByteArrayInputStream(buffer.toByteArray());
 
-                totalIncomeMDN += (double) singleSheetResults.getOrDefault("Total Income MDN", 0.0);
-                countMDN += (int) singleSheetResults.getOrDefault("Num of MDNs", 0);
-                totalIncomeMR += (double) singleSheetResults.getOrDefault("Total Income MR", 0.0);
-                countMR += (int) singleSheetResults.getOrDefault("Num of MRs", 0);
-            } else if (numberOfSheets >= 2) {
-                // Process MDN sheet
-                Sheet mdnSheet = workbook.getSheetAt(0);
-                Map<String, Object> mdnResults = new HashMap<>();
-                PostPaidSheetProcessor.process(mdnSheet, mdnResults);
+                Workbook workbook = WorkbookFactory.create(excelStream);
+                int numberOfSheets = workbook.getNumberOfSheets();
 
-                totalIncomeMDN += (double) mdnResults.getOrDefault("Total Income MDN", 0.0);
-                countMDN += (int) mdnResults.getOrDefault("Num of MDNs", 0);
+                Map<String, Object> results = new HashMap<>();
+                if (numberOfSheets == 1) {
+                    Sheet singleSheet = workbook.getSheetAt(0);
+                    PostPaidSheetProcessor.process(singleSheet, results);
+                } else if (numberOfSheets >= 2) {
+                    Sheet mdnSheet = workbook.getSheetAt(0);
+                    PostPaidSheetProcessor.process(mdnSheet, results);
 
-                // Process MR sheet
-                Sheet mrSheet = workbook.getSheetAt(1);
-                Map<String, Object> mrResults = new HashMap<>();
-                SeparateMRSheetProcessor.process(mrSheet, mrResults);
+                    Sheet mrSheet = workbook.getSheetAt(1);
+                    SeparateMRSheetProcessor.process(mrSheet, results);
+                }
 
-                totalIncomeMR += (double) mrResults.getOrDefault("Total Income MR", 0.0);
-                countMR += (int) mrResults.getOrDefault("Num of MRs", 0);
+                // Store results by account (Excel file name)
+                String accountName = entry.getName().replace(".xlsx", ""); // Remove extension for clarity
+                accountResults.put(accountName, results);
+
+                workbook.close();
             }
-
-            workbook.close();
         } catch (Exception e) {
-            results.put("error", "Error processing file: " + e.getMessage());
-            return results;
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Error processing ZIP file: " + e.getMessage());
+            accountResults.put("Error", error);
+            return accountResults;
         }
 
-        results.put("Total Income MDN", totalIncomeMDN);
-        results.put("Num of MDNs", countMDN);
-        results.put("Total Income MR", totalIncomeMR);
-        results.put("Num of MRs", countMR);
-        return results;
+
+        return accountResults;
     }
+
+
+
 }
